@@ -18,4 +18,4 @@ You can use it as a module as well:
   print(out)
 ```
 [Brainknot Main Repository](github.com/mahdoosh1/brainknot)
-[Previous Repository](github.com/mahdoosh1/brainknot-interpreter)
+[Previous Repository](github.com/mahdoosh1/Python-Brainknot)
