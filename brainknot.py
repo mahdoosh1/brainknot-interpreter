@@ -1,3 +1,4 @@
+#pylint:disable=W0120
 def find_loc(code, char, index, start, end, reversed=False, ignore_warning=False):
     late = code[index+1:]
     matching = 0
@@ -47,10 +48,10 @@ def brainknot(code, input_data):
   # Initialize stacks for input, output, and main memory
   input_stack = list(input_data)
   output_stack = []
-  memory_stack = [0] * 30000  # Adjust stack size as needed
+  memory_stack = [[0] * 256] * 256  # Adjust stack size as needed
   
   # Current memory pointer and bit
-  mem_ptr = 0
+  mem_ptr = [0, 0]
   current_bit = 0
   code_index = 0
   # Function address table and return stack
@@ -59,11 +60,21 @@ def brainknot(code, input_data):
   ret = []
   # Function end table
   funcs_end = []
+  # If statement addresses
+  elses = []
+  conditions = []
+  starts = []
+  anti_loop = 200
+  loop_count = 0
   
   prev = ''
+  exit_code = ""
+  # loop breaked
+  breaked = False
   while code_index < len(code):
     char = code[code_index]
     # Debugging
+    # print(char, '<--', code_index)
     # print(f'\n{code[:code_index]}  {char}  {code[code_index+1:]}\n')
     if char == '>':
       # Input: Pop from input stack and set current bit
@@ -71,38 +82,107 @@ def brainknot(code, input_data):
         current_bit = int(input_stack.pop(0))
       else:
         char = '.'
+        # Debugging
+        # print('break')
     elif char == '<':
       # Output: Push current bit to output stack
       output_stack.append(str(current_bit))
     elif char == '-':
       # Pop from main stack and set current bit
-      if mem_ptr >= 1:
-          current_bit = memory_stack[mem_ptr]
-          memory_stack[mem_ptr] = 0
-          mem_ptr -= 1
+      if mem_ptr[1] >= 1:
+          current_bit = memory_stack[mem_ptr[0]][mem_ptr[1]]
+          memory_stack[mem_ptr[0]][mem_ptr[1]] = 0
+          mem_ptr[1] -= 1
+      else:
+          current_bit = 0
+          # end the loop
+          char = '.'
+    elif char == '~':
+      if mem_ptr[1] >= 1:
+          current_bit = memory_stack[mem_ptr[0]][mem_ptr[1]]
       else:
           current_bit = 0
           # end the loop
           char = '.'
     elif char == '+':
       # Push current bit to main stack
-      memory_stack[mem_ptr] = current_bit
-      mem_ptr += 1
+      memory_stack[mem_ptr[0]][mem_ptr[1]] = current_bit
+      mem_ptr[1] += 1
+    elif char in '0123456789':
+      i = 0
+      while code[code_index+i] in '0123456789':
+          i += 1
+      end = code_index + i
+      adr = code[code_index:end]
+      mem_ptr[0] = int(adr)
     elif char == '*':
       # Flip current bit
       current_bit = 1 - current_bit
+    elif char == '{':
+      # Handle escape charactor
+      is_escaped = True
+      end = -1
+      while is_escaped:
+        end += 1
+        end = code[code_index+end:].find('}')+code_index+end
+        j = end - 1
+        is_escaped = False
+        while code[j] == '\\':
+            is_escaped = not is_escaped
+            j -= 1
+      x = code[code_index+1:end]
+      # Remove escape charactors
+      idx = x.find('\\')
+      while True:
+          if x[idx] == '\\' and idx != -1:
+              x = x[:idx] + x[idx+1:] # remove x[idx]
+          else:
+              print('warning! tried to remove non escape charactor:',x[idx])
+              # Debugging
+              # print(f'\'{x}\'[{idx+1}:].find(\'\\\\\')')
+              # print(f'\'{x[idx+1:]}\'.find(\'\\\\\')')
+              # print(' ' + ' '*idx + '^')
+              print(idx)
+          n = idx
+          idx = x[idx+1:].find('\\')+idx+1
+          if not ((idx - 1 - n >= 0) and ('\\' in x[idx:])):
+              break
+      output_stack.append(x)
+      code_index = end
     elif char == '[':
+      condition = current_bit
       # If statement, function definition
-      if (not current_bit) and (prev != ':'):
+      if (prev != ':'):
           # find comma
           x = find_loc(code, ',', code_index, '[', ']', ignore_warning=True)
           if x is None:
-            # if couldn't find comma, find closed bracket
-            code_index = find_loc(code, ']', code_index, '[', ']')
+            # if couldn't find comma, find end of if
+            if not condition:
+                code_index = find_loc(code, ']', code_index, '[', ']')
           else:
-            code_index = x
+            # find end of statement
+            z = find_loc(code, ']', x, '[',']', ignore_warning=True)
+            # check if last statement exist
+            # the one where executes first no matter current bit
+            y = find_loc(code, ',', x, '[',']', ignore_warning=True)
+            if not (y is None):
+                # check if y is not inside if statement
+                # if check fails this means y is not valid
+                if y >= z:
+                    y = None
+            starts.append(y)
+            # Debugging
+            # print(not (y is None))
+            if y is None:
+                if not condition:
+                    code_index = x
+            else:
+                conditions.append(condition)
+                elses.append(x)
+                code_index = y
       elif prev == ':':
-          print("D") # D = Defining
+          # Debugging
+          # print("D") # D = Defining
           # Find func name
           i = code_index-2
           while code[i] in "abcdefghijklmnopqrstuvwxyz":
@@ -126,24 +206,75 @@ def brainknot(code, input_data):
       # End of if statement
       # But could be end of function?
       if code_index in funcs_end:
+          # Debugging
+          # print("R") # R = Returning
           # jump back
-          print("R") # R = Returning
           pop = ret.pop()
           if pop == "end":
               break
           else:
               code_index = pop-1 # -1 here and +1 at 
-              # the end of loop cancel out
+              # the end of loop(at line 283) cancel out
+      elif not(starts.pop() is None):
+          if conditions.pop():
+              start = find_loc(code, '[', code_index, '[', ']', reversed=True)
+              code_index = start
+          else:
+              # i dont need to search it because
+              # start = find_loc(code, ',', code_index, '[', ']', reversed=True) # this is last comma
+              # start = find_loc(code[:start], ',', start-1, '[', ']', reversed=True) # this is first comma
+              # i already have elses
+              start = elses.pop()
+          code_index = start
     elif char == '(':
-      # Loop start
-      if not current_bit:
-          # if loop shouldn't start goto loop end
-          code_index = find_loc(code, ')', code_index, '(', ')') 
+      # Loop start or function definition with call
+      if prev != ':':
+          if not current_bit:
+              # if loop shouldn't start, goto loop end
+              code_index = find_loc(code, ')', code_index, '(', ')') 
+      else:
+          # Debugging
+          # print("D") # D = Defining
+          # Find func name
+          i = code_index-2
+          while code[i] in "abcdefghijklmnopqrstuvwxyz":
+              i -= 1
+              if i == -1:
+                  break
+          name = code[i+1:code_index-1]
+          # Find end
+          end = find_loc(code, ')', code_index, '(', ')')
+          start = code_index+1
+          funcs[name] = start
+          funcs_end.append(end)
+          # Debugging
+          # print("   ",name,"= {")
+          # print("        do",code[start:end])
+          # print("    }")
+          # dont exit definition, but add exit to ret
+          # (because this is a call)
+          ret.append(end+2)
     elif char == ')':
-      # Loop end
-      if current_bit:
+      # Loop end or function call end?
+      if code_index in funcs_end:
+          # Debugging
+          # print("R") # R = Returning
+          # jump back
+          pop = ret.pop()
+          if pop == "end":
+              break
+          else:
+              code_index = pop-1 # -1 here and +1 at 
+              # the end of loop(at line 283) cancel out
+      # should loop and havent breaked?
+      elif current_bit and not breaked:
         # if loop is at end come back to start
-        code_index = find_loc(code, '(', code_index, '(', ')', reversed=True)
+        start = find_loc(code, '(', code_index, '(', ')', reversed=True)
+        code_index = start
+        loop_count += 1
+      # if breaked, stop being breaked and continue the code
+      elif breaked:
+          breaked = False
     elif char in "abcdefghijklmnopqrstuvwxyz":
         # Function call
         # or function definition?
@@ -162,30 +293,43 @@ def brainknot(code, input_data):
                 ret.append(end)
             else:
                 ret.append("end")
-            # Debugging
-            print("C [",name,"]") # C = Calling
             code_index = funcs[name]-1 # -1 here and +1 at 
             # the end of loop cancel out
             # Debugging
+            # print("C [",name,"]") # C = Calling
             # stack = memory_stack
             # stack = f"{stack[:mem_ptr]}{stack[mem_ptr]}{stack[mem_ptr+1:16]}"
             # print(stack)
+            loop_count += 1
     if char == '.':
       # Break loop (version 2)
-      code_index = find_loc(code, ')', code_index, '(', ')') 
+      break_exit = find_loc(code, ')', code_index, '(', ')')
+      # handle function end
+      if break_exit in funcs_end:
+          code_index = ret.pop()
+          # break from the loop that called this func
+          breaked = True
+      else:
+          code_index = break_exit 
     code_index += 1
     # print(current_bit,"\n")
     prev = char
-  return ''.join([str(b) for b in output_stack])
+    if loop_count > anti_loop:
+        exit_code = "Anti loop break, do not loop indefinitely"
+        break
+  return ''.join(list(map(str, output_stack))) + exit_code
 
 def main():
   while True:
     code = input('Code: ')
     if code == 'exit':
       return 0
+    if code == 'R':
+      code = last
     input_data = input('Input: ')
     output = brainknot(code, input_data)
     print('Output:',output)
+    last = code
 
 if __name__ == '__main__':
     main()
