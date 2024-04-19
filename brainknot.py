@@ -317,7 +317,7 @@ def brainknot(code, input_data):
     if loop_count > anti_loop:
         exit_code = "Anti loop break, do not loop indefinitely"
         break
-  return ''.join(list(map(str, output_stack))) + exit_code
+  return ''.join(list(map(str, output_stack))) + + ' ' + exit_code
 
 def main():
   while True:
