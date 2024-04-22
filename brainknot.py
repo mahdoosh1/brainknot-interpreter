@@ -112,6 +112,8 @@ def brainknot(code, input_data):
       i = 0
       while code[code_index+i] in '0123456789':
           i += 1
+          if code_index+i >= len(code):
+              break
       end = code_index + i
       adr = code[code_index:end]
       mem_ptr[0] = int(adr)
