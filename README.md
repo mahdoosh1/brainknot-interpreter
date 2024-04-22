@@ -17,5 +17,5 @@ You can use it as a module as well:
   out = brainknot(sourcecode,inputs)
   print(out)
 ```
-[Brainknot Main Repository](github.com/mahdoosh1/brainknot)
-[Previous Repository](github.com/mahdoosh1/Python-Brainknot)
+[Brainknot Main Repository  ](github.com/mahdoosh1/brainknot)  
+[  Previous Repository](github.com/mahdoosh1/Python-Brainknot)
