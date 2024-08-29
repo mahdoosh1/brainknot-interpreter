@@ -1,3 +1,5 @@
+import time
+
 #pylint:disable=W0120
 def find_loc(code, char, index, start, end, reversed=False, ignore_warning=False):
     late = code[index+1:]
@@ -22,7 +24,10 @@ def find_loc(code, char, index, start, end, reversed=False, ignore_warning=False
             i -= 1
         else:
             i += 1
-        cond = ((i < len(late)) and not reversed) or ((i >= 0) and reversed)
+        cond =  (i < len(late)) and not reversed
+        cond |= (i >= 0) and reversed
+        cond &= char in late[i-1:] or reversed
+        cond &= char in late[:i+1] or not reversed
     else:
         if not ignore_warning:
             print('warning, could not find end of statement, this may break things')
@@ -71,6 +76,7 @@ def brainknot(code, input_data):
   exit_code = ""
   # loop breaked
   breaked = False
+  time_start = time.perf_counter()
   while code_index < len(code):
     char = code[code_index]
     # Debugging
@@ -112,7 +118,7 @@ def brainknot(code, input_data):
       i = 0
       while code[code_index+i] in '0123456789':
           i += 1
-          if code_index+i >= len(code):
+          if code_index + i >= len(code):
               break
       end = code_index + i
       adr = code[code_index:end]
@@ -138,7 +144,9 @@ def brainknot(code, input_data):
       y = idx != -1
       while y:
           if x[idx] == '\\' and idx != -1:
-              x = x[:idx] + x[idx+1:] # remove x[idx]
+              c = x[idx+1]
+              c = c.replace('n','\n')
+              x = x[:idx] + c + x[idx+2:] # remove x[idx]
           else:
               print('warning! tried to remove non escape charactor:',x[idx])
               # Debugging
@@ -162,6 +170,8 @@ def brainknot(code, input_data):
             # if couldn't find comma, find end of if
             if not condition:
                 code_index = find_loc(code, ']', code_index, '[', ']')
+            else:
+                starts.append(None)
           else:
             # find end of statement
             z = find_loc(code, ']', x, '[',']', ignore_warning=True)
@@ -313,16 +323,21 @@ def brainknot(code, input_data):
           # break from the loop that called this func
           breaked = True
       else:
-          code_index = break_exit 
+          code_index = break_exit
+          if code_index is None:
+              code_index = len(code)-1
     code_index += 1
     # print(current_bit,"\n")
     prev = char
     if loop_count > anti_loop:
         exit_code = "Anti loop break, do not loop indefinitely"
         break
+  time_end = time.perf_counter()
+  print(f"Took {time_end - time_start} seconds.")
   return ''.join(list(map(str, output_stack))) + ' ' + exit_code
 
 def main():
+  last = ''
   while True:
     code = input('Code: ')
     if code == 'exit':
