@@ -1,15 +1,11 @@
 This is a Brainknot interpreter written in Python.
 
-Usage:
- Open file with python by double clicking.
- or use `python3 brainknot.py` in order to run the code
-
-You can use it as a module as well:
+You can use it as a module:
 ```python
   from brainknot import brainknot
 
   sourcecode = """
-    xor:[>[>*<,><]] xor xor xor
+    *(>[>*,>]<[,*])
   """
 
   inputs = "011011"
