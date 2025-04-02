@@ -1,5 +1,6 @@
 import warnings
 from PIL import Image
+from ast import literal_eval
 VALID_FUNC_CHARS = tuple("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.")
 
 def backslash_handler(text, end_char):
@@ -110,7 +111,7 @@ def convert_3rd_if(code):
             if end:
                 comma = find_loc(code,index,",")
                 if comma:
-                    next_comma = find_loc(code,comma+1,",")
+                    next_comma = find_loc(code,comma,",")
                     if next_comma:
                         previous_part = code[:index]
                         if_part = convert_3rd_if(code[index+1:comma])
@@ -303,11 +304,34 @@ def parser(tokens):
         last_token = list(token)
     return new_tokens
 
+class FormatError(SyntaxError):
+    pass
+
+def validate(tokens):
+    if isinstance(tokens, list) or isinstance (tokens, tuple):
+        for token in tokens:
+            if len(token) == 0:
+                raise FormatError("Detected empty token")
+            if not isinstance(token[0], str):
+                raise FormatError("Detected non-string name for token")
+            if len(token) > 1:
+                if token[0] in ("FUNC_NAME", "PRINT"):
+                    if not isinstance(token[1], str):
+                        raise FormatError("Detected non-string parameter for FUNC_NAME or PRINT")
+                    continue
+                for new_tokens in token[1:]:
+                    validate(new_tokens)
+        return
+    raise FormatError("Non iterable tokens")
+
 def evaluator(tokens,inputs=None):
     if inputs is None:
         inputs = []
     if isinstance(inputs, str):
         inputs = inputs[::-1]
+    if isinstance(tokens, str):
+        tokens = literal_eval(tokens)
+        validate(tokens)
     input_stack = list(map(int,inputs))
     output_stack = []
     memory_stack = [[0] * 256] * 256  # Adjust stack size as needed
@@ -456,9 +480,9 @@ def evaluator(tokens,inputs=None):
                     depth.pop()
                     depth.pop()
                 else:
-                    raise RuntimeError("Cannot break because of input/stack pop error")
+                    raise RuntimeError("There were not enough inputs")
             else:
-                raise RuntimeError("Cannot break because of input/stack pop error")
+                raise RuntimeError("There were not enough inputs")
         if op == "BREAK":
             if len(depth) > 2:
                 depth.pop() # get the index out
