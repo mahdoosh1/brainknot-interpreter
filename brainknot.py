@@ -2,7 +2,6 @@ import warnings
 from PIL import Image
 from ast import literal_eval
 VALID_FUNC_CHARS = tuple("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.")
-
 def backslash_handler(text, end_char):
     b = 0
     out = ''
@@ -109,9 +108,9 @@ def convert_3rd_if(code):
           if char == "[" and not stopper:
             end = find_loc(code,index,"]")
             if end:
-                comma = find_loc(code,index,",")
+                comma = find_loc(code[:end],index,",")
                 if comma:
-                    next_comma = find_loc(code,comma,",")
+                    next_comma = find_loc(code[:end],comma,",")
                     if next_comma:
                         previous_part = code[:index]
                         if_part = convert_3rd_if(code[index+1:comma])
@@ -126,6 +125,7 @@ def convert_3rd_if(code):
 
 def lexer(code):
     code = simple_optimize(code)
+    print(code)
     code = convert_3rd_if(code)
     code = simple_optimize(code)
     tokens = []
@@ -140,14 +140,14 @@ def lexer(code):
     stack_number = None
     while index < len(code):
         char = code[index]
-        if char == "/":
+        if (not print_statement) and char == "/":
             comment = not comment
-        elif char == "{":
+        elif (not comment) and char == "{":
             print_statement = True
-            handle = backslash_handler(code[index+1:],"}")
-            if handle is None:
+            end = backslash_handler(code[index+1:],"}")
+            if end is None:
                 raise SyntaxError("Print statement is not terminated")
-            token, index = handle
+            token, index = end
             tokens.append(("PRINT",token))
         elif not (comment or print_statement):
             if if_depth == 0 and loop_depth == 0:
@@ -224,7 +224,7 @@ def lexer(code):
                     loop_segment = code[loop_start+1:index]
                     token = ("LOOP",lexer(loop_segment))
                     tokens.append(token)
-            if if_depth == 0 and loop_depth == 0:
+            if if_depth == 0 and loop_depth == 0 and not func_name:
                 if char in "0123456789":
                    if not stack_number:
                        stack_number = ""
@@ -346,6 +346,9 @@ def evaluator(tokens,inputs=None):
     screen_location = [0, 0]
     frames = []
     # recursive index: [name, index]
+    loop_break = 200
+    loop_depth = 0
+    
     depth = [["ROOT",0]]
     def get_token(depth):
         token = tokens
@@ -359,11 +362,15 @@ def evaluator(tokens,inputs=None):
                 return False, name
         return True, token
     while True:
+        if loop_depth > loop_break:
+            output_stack.append("AntiLoop break")
+            break
         valid, temp = get_token(depth)
         if not valid:
             name = temp
             if name == "LOOP":
                 token = ("RELOOP",)
+                loop_depth += 1
             elif name == "ROOT":
                 token = ("HALT",)
             else:
@@ -522,6 +529,7 @@ def pp(tokens):
     print(pretty_print(tokens))
 
 def main():
+    from traceback import format_exc
     prev = ""
     while True:
         code = input("code: ")
@@ -540,7 +548,7 @@ def main():
             print(e[0])
             print()
         except Exception as e:
-            print(repr(e))
+            print(format_exc())
         prev = code
 
 if __name__ == "__main__":
