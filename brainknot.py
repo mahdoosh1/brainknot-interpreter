@@ -125,7 +125,6 @@ def convert_3rd_if(code):
 
 def lexer(code):
     code = simple_optimize(code)
-    print(code)
     code = convert_3rd_if(code)
     code = simple_optimize(code)
     tokens = []
@@ -323,6 +322,44 @@ def validate(tokens):
                     validate(new_tokens)
         return
     raise FormatError("Non iterable tokens")
+
+def decompile(tokens):
+    output = []
+    direct_copy = {
+        'INPUT': '>',
+        'OUTPUT': '<',
+        'POP': '-',
+        'PUSH': '+',
+        'POPPUSH': '~',
+        'FLIP': '*',
+        'PSTACK': '_',
+        'BREAK': '.',
+        'PIXEL': '^',
+        'LINE': '\\',
+        'FRAME': ';'
+    }
+    for token in tokens:
+        if token[0] == 'PRINT':
+            output.append('{'+token[1]+'}')
+        elif token[0] == 'FUNC_NAME':
+            output.append(' '+token[1])
+        elif token[0] == 'DEF':
+            output.append(':['+decompile(token[1])+']')
+        elif token[0] == 'DEF_EXEC':
+            output.append(':()'+decompile(token[1])+')')
+        elif token[0] == 'IF':
+            output.append('['+decompile(token[1])+']')
+        elif token[0] == 'ELSE':
+            output.append('[,'+decompile(token[1])+']')
+        elif token[0] == 'IF_ELSE':
+            output.append('['+decompile(token[1])+','+decompile(token[2])+']')
+        elif token[0] == 'LOOP':
+            output.append('('+decompile(token[1])+')')
+        elif token[0] == 'STACK':
+            output.append(' '+str(token[1]))
+        else:
+            output.append(direct_copy[token[0]])
+    return ''.join(output)
 
 def evaluator(tokens,inputs=None):
     if inputs is None:
