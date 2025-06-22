@@ -1,25 +1,23 @@
 import warnings
 from PIL import Image
 from ast import literal_eval
-VALID_FUNC_CHARS = tuple("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.")
+VALID_FUNC_CHARS = tuple("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.0123456789")
 def backslash_handler(text, end_char):
-    b = 0
+    b = False
     out = ''
     for idx, i in enumerate(text):
-        if i == end_char and b == 0:
+        if (i == end_char) and not b:
             return out, idx
         if i == '\\':
             if b:
                 out += i
-            b = 1 - b
+            b = not b
         else:
             if b:
-              try:
-                i = eval('"\\'+i+'"')
-              except:
-                pass
+                try:i = eval(f"\\{i}")
+                except:pass
             out += i
-            b = 0
+            b = False
 
 def find_loc(code, index, char):
     late = code[index+1:]
@@ -53,41 +51,6 @@ def find_loc(code, index, char):
             loops -= 1
         i += 1
     return False
-def optimize_space(code):
-    replaces = []
-    k = ""
-    j = ""
-    for i in code:
-        if j == " ":
-            if i not in VALID_FUNC_CHARS:
-                if k not in VALID_FUNC_CHARS:
-                    if k:
-                        replaces.append((k,i))
-        k = j
-        j = i
-    for i in replaces:
-        a, b = i
-        s, n = a+b, a+" "+b
-        code = code.replace(n, s)
-    return code
-def simple_optimize(code):
-    code = optimize_space(code)
-    while True:
-        condition = "**" in code
-        condition |= "[]" in code
-        condition |= ",]" in code
-        condition |= "*-" in code
-        condition |= "*>" in code
-        condition |= "  " in code
-        if not condition:
-            break
-        code = code.replace("**","")
-        code = code.replace("[]","")
-        code = code.replace(",]","]")
-        code = code.replace("*-","-")
-        code = code.replace("*>",">")
-        code = code.replace("  "," ")
-    return code
 
 def convert_3rd_if(code):
     index = 0
@@ -95,17 +58,17 @@ def convert_3rd_if(code):
     comment = False
     escaped = False
     while index < len(code):
-          char = code[index]
-          if char == "{":
-              printer = True
-          if char == "\\":
-              escaped = not escaped
-          if char == "}" and not escaped:
-              printer = False
-          if char == "/":
-              comment = not comment
-          stopper = printer or comment
-          if char == "[" and not stopper:
+        char = code[index]
+        if char == "{":
+            printer = True
+        if char == "\\":
+            escaped = not escaped
+        if char == "}" and not escaped:
+            printer = False
+        if char == "/":
+            comment = not comment
+        stopper = printer or comment
+        if char == "[" and not stopper:
             end = find_loc(code,index,"]")
             if end:
                 comma = find_loc(code[:end],index,",")
@@ -120,13 +83,11 @@ def convert_3rd_if(code):
                         if_collected = "["+start_part+if_part+","+start_part+else_part+"]"
                         code = previous_part + if_collected + next_part
                         index += len(if_collected)
-          index += 1
+        index += 1
     return code
 
-def lexer(code):
-    code = simple_optimize(code)
+def lexer(code, optimize_=True):
     code = convert_3rd_if(code)
-    code = simple_optimize(code)
     tokens = []
     print_statement = False
     comment = False
@@ -142,12 +103,13 @@ def lexer(code):
         if (not print_statement) and char == "/":
             comment = not comment
         elif (not comment) and char == "{":
-            print_statement = True
             end = backslash_handler(code[index+1:],"}")
             if end is None:
                 raise SyntaxError("Print statement is not terminated")
-            token, index = end
-            tokens.append(("PRINT",token))
+            token, new_index = end
+            index += new_index + 1
+            if loop_depth == 0 and if_depth == 0:
+                tokens.append(("PRINT",token))
         elif not (comment or print_statement):
             if if_depth == 0 and loop_depth == 0:
                 if char in VALID_FUNC_CHARS:
@@ -156,14 +118,16 @@ def lexer(code):
                     func_name += char
                 elif func_name:
                     is_stack_number = False
-                    if func_name[0].isdigit() and func_name not in ("_","."):
+                    if func_name[0].isdigit():
                         is_stack_number = all(i in "0123456789" for i in func_name)
                         if not is_stack_number:
                             raise SyntaxError("Function name cannot start with underline, dot, or a digit")
+                        else:
+                            stack_number = func_name
                     if func_name not in ("_",".") and not is_stack_number:
                         token = ("FUNC_NAME",func_name)
                         tokens.append(token)
-                        func_name = None
+                    func_name = None
             if char == "[":
                 if prev != ":":
                     if_depth += 1
@@ -171,15 +135,20 @@ def lexer(code):
                     if if_depth == 1 and loop_depth == 0:
                         if_start = index
                         else_start = None
+                        special_start = None
                 elif if_depth == 0 and loop_depth == 0:
                     def_start = index+1
                     index = find_loc(code,index,"]")
                     if not index:
                         raise SyntaxError("Function definition didn't finish")
-                    token = ("DEF",lexer(code[def_start:index]))
+                    token = ("DEF",lexer(code[def_start:index],False))
                     tokens.append(token)
             elif char == "," and if_depth == 1 and loop_depth == 0:
-                else_start = index
+                if not else_start:
+                    else_start = index
+                    special_start = None
+                else:
+                    special_start = index
             elif char == "]":
                 if if_depth == 0:
                     raise SyntaxError("if ended outside its statement")
@@ -187,16 +156,21 @@ def lexer(code):
                     raise SyntaxError("If ended inside a loop")
                 if_depth -= 1
                 if loop_depth == 0 and if_depth == 0:
-                    if else_start is None:
+                    if special_start:
+                        if_segment = code[if_start+1:else_start]
+                        else_segment = code[else_start+1:special_start] # type: ignore
+                        special_segment = code[special_start+1:index]
+                        token = ("IF_ELSE_SPECIAL", lexer(if_segment,False), lexer(else_segment,False), lexer(special_segment,False))
+                    elif else_start is None:
                         if_segment = code[if_start+1:index]
-                        token = ("IF", lexer(if_segment))
+                        token = ("IF", lexer(if_segment,False))
                     elif else_start != (if_start +1):
                         if_segment = code[if_start+1:else_start]
                         else_segment = code[else_start+1:index]
-                        token = ("IF_ELSE", lexer(if_segment), lexer(else_segment))
+                        token = ("IF_ELSE", lexer(if_segment,False), lexer(else_segment,False))
                     else:
                         else_segment = code[else_start+1:index]
-                        token = ("ELSE",lexer(else_segment))
+                        token = ("ELSE",lexer(else_segment,False))
                     tokens.append(token)
                     if_segment = None
                     else_segment = None
@@ -211,7 +185,7 @@ def lexer(code):
                     index = find_loc(code,index,")")
                     if not index:
                         raise SyntaxError("function definition didn't finish")
-                    token = ("DEF_EXEC",lexer(code[def_start:index]))
+                    token = ("DEF_EXEC",lexer(code[def_start:index],False))
                     tokens.append(token)
             elif char == ")":
                 if loop_depth == 0:
@@ -221,17 +195,17 @@ def lexer(code):
                 loop_depth -= 1
                 if if_depth == 0 and loop_depth == 0:
                     loop_segment = code[loop_start+1:index]
-                    token = ("LOOP",lexer(loop_segment))
+                    token = ("LOOP",lexer(loop_segment,False))
                     tokens.append(token)
             if if_depth == 0 and loop_depth == 0 and not func_name:
                 if char in "0123456789":
-                   if not stack_number:
-                       stack_number = ""
-                   stack_number += char
+                    if not stack_number:
+                        stack_number = ""
+                    stack_number += char
                 elif stack_number:
                     tokens.append(("STACK",int(stack_number)))
                     stack_number = None
-                elif char == ">":
+                if char == ">":
                     tokens.append(("INPUT",))
                 elif char == "<":
                     tokens.append(("OUTPUT",))
@@ -272,36 +246,244 @@ def lexer(code):
             tokens.append(token)
     if stack_number:
         tokens.append(("STACK",int(stack_number)))
+    if optimize_:
+        return optimize(tokens,rearrange=False)
     return tokens
 
-def parser(tokens):
-    new_tokens = []
+def is_dependent(token):
+    return token[0] not in ('STACK','FRAME','LINE','PRINT','POP','POPPUSH','INPUT','PSTACK','DEF')
+def is_modifier(token):
+    return token[0] not in ('STACK','FRAME','LINE','PRINT','PUSH','OUTPUT','PSTACK','DEF')
+
+def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit=None) -> list[tuple]:
+    if amount < 1:
+        return tokens
+    if rearrange:
+        code = decompile(tokens)
+        tokens = lexer(code)
+        return tokens
+    original_current_bit = _current_bit
+    output = []
     index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if index == 0:
-            new_tokens.append(token)
+    length = len(tokens)
+    def get_next_token(index, tokens=tokens):
+        if index + 1 < len(tokens):
+            return tokens[index + 1]
+        return ("NOP",[], [])
+    def get_next_dependent_token(index, tokens=tokens):
+        next_token = get_next_token(index)
+        while not is_dependent(next_token):
             index += 1
-            last_token = list(token)
-            continue
-        if last_token[0] == token[0] and token[0] in ("RUN","PRINT","LOOP"):
-            if token[0] == "LOOP":
-                warnings.warn(SyntaxWarning("Using two adjacent loops is useless because second loop will never run"))
-                index += 1
-                last_token = list(token)
+            next_token = get_next_token(index)
+        return next_token
+    def get_next_modifier_token(index, tokens=tokens):
+        next_token = get_next_token(index)
+        while not is_modifier(next_token):
+            index += 1
+            next_token = get_next_token(index)
+        return next_token
+    current_stack = 0
+    while index < length:
+        token = tokens[index]
+        if token[0] in ('POP', 'INPUT'):
+            _current_bit = 2
+        elif token[0] == 'FLIP':
+            next_token = get_next_token(index)
+            if next_token[0] == 'FLIP':
+                index += 2
                 continue
-            last_token[1] += token[1]
-            token = tuple(last_token)
-            new_tokens[-1] = token
-        else:
-            if token[0] == "IF_ELSE":
-                token = ("IF_ELSE",parser(token[1]),parser(token[2]))
-            elif token[0] in ("DEF", "DEF_EXEC", "IF", "LOOP","ELSE"):
-                token = (token[0],parser(token[1]))
-            new_tokens.append(token)
+            next_token = get_next_modifier_token(index)
+            if not is_dependent(next_token):
+                index += 1
+                continue
+            if _current_bit < 2:
+                _current_bit = 1 - _current_bit
+        elif token[0] == 'LOOP':
+            loop_block = token[1]
+            if len(loop_block) == 0 or _current_bit == 0:
+                index += 1
+                continue
+            loop_block, temp = optimize(loop_block, amount, rearrange, _current_bit=1)
+            sub_token = get_next_modifier_token(-1, loop_block)
+            _current_bit = 0
+            if sub_token[0] == 'LOOP' and temp == 0:
+                output.extend(loop_block)
+                index += 1
+                continue
+            token = (token[0], loop_block)
+        elif token[0] == 'IF':
+            if_block = token[1]
+            if len(if_block) == 0 or _current_bit == 0:
+                index += 1
+                continue
+            if_block, temp = optimize(if_block, amount, rearrange, _current_bit=1)
+            sub_token = get_next_modifier_token(-1, if_block)
+            if sub_token[0] == 'LOOP':
+                output.extend(if_block)
+                _current_bit = temp
+                index += 1
+                continue
+            if _current_bit == 1:
+                output.extend(if_block)
+                _current_bit = temp
+                index += 1
+                continue
+            token = ('IF', if_block)
+        elif token[0] == 'ELSE':
+            else_block = token[1]
+            if len(else_block) == 0 or _current_bit == 1:
+                index += 1
+                continue
+            else_block, temp = optimize(else_block, amount, rearrange, _current_bit=0) # type: ignore
+            if _current_bit == 0:
+                output.extend(else_block)
+                _current_bit = temp
+                index += 1
+                continue
+            token = ('ELSE', else_block)
+        elif token[0] in ('IF_ELSE', 'IF_ELSE_SPECIAL'):
+            if_block = token[1]
+            else_block = token[2] # type: ignore
+            if len(if_block) == 0:
+                if len(else_block) == 0 or token[0] == 'IF_ELSE_SPECIAL':
+                    if token[0] == 'IF_ELSE_SPECIAL':
+                        if len(else_block) == 0:
+                            temp, _current_bit = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                            output.extend(temp)
+                        else:
+                            temp_b, temp_c = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                            if _current_bit in (0, 2):
+                                temp_a, temp_d = optimize(token[2], amount, rearrange, _current_bit=temp_c) # type: ignore
+                            if _current_bit == 0:
+                                output.extend(temp_b)
+                                output.extend(temp_a)
+                                _current_bit = temp_d
+                            elif _current_bit == 1:
+                                output.extend(temp_b)
+                                _current_bit = temp_c
+                            else:
+                                output.append((token[0],[],temp_a,temp_b))
+                                _current_bit = temp_d
+                    index += 1
+                    continue
+                token = ('ELSE', else_block)
+            elif len(else_block) == 0:
+                if token[0] == 'IF_ELSE':
+                    token = ('IF', if_block)
+                else:
+                    temp_b, temp_c = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                    if _current_bit in (1,2):
+                        temp_a, temp_d = optimize(token[1], amount, rearrange, _current_bit=temp_c) # type: ignore
+                    if _current_bit == 1:
+                        output.extend(temp_b)
+                        output.extend(temp_a)
+                        _current_bit = temp_d
+                    elif _current_bit == 0:
+                        output.extend(temp_b)
+                        _current_bit = temp_c
+                    else:
+                        output.append((token[0],temp_a,[],temp_b))
+                        _current_bit = temp_d
+                    index += 1
+                    continue
+            else:
+                if token[0] == 'IF_ELSE_SPECIAL':
+                    starts, temp = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                    if _current_bit in (1, 2):
+                        if_block, temp_a = optimize(if_block, amount, rearrange, _current_bit=temp)
+                    else:
+                        if_block = []
+                    if _current_bit in (0, 2):
+                        else_block, temp_b = optimize(else_block, amount, rearrange, _current_bit=temp) # type: ignore
+                    else:
+                        else_block = []
+                    if _current_bit == 0:
+                        _current_bit = temp_b
+                    elif _current_bit == 1:
+                        _current_bit = temp_a
+                    elif temp_a == temp_b: # type: ignore
+                        _current_bit = temp_a
+                    else:
+                        _current_bit = 2
+                else:
+                    print(if_block)
+                    if_block, temp_a = optimize(if_block, amount, rearrange, _current_bit=1)
+                    else_block, temp_b = optimize(else_block, amount, rearrange, _current_bit=0) # type: ignore
+                    if temp_a == temp_b:
+                        _current_bit = temp_a
+                    else:
+                        _current_bit = 2
+                    starts = []
+                repeats = []
+                for a, b in zip(if_block[::-1],else_block[::-1]):
+                    if a != b:
+                        break
+                    repeats.append(a)
+                if repeats:
+                    repeats_length = len(repeats)
+                    if_index = len(if_block) - repeats_length
+                    else_index = len(else_block) - repeats_length
+                    if_block = if_block[:if_index]
+                    else_block = else_block[:else_index]
+                for a, b in zip(if_block, else_block):
+                    if a != b:
+                        break
+                    starts.append(a) # type: ignore
+                if repeats:
+                    if starts:
+                        starts_length = len(starts)
+                        if token[0] == 'IF_ELSE_SPECIAL':
+                            starts_length -= len(token[3]) # type: ignore
+                        if_block = if_block[starts_length:]
+                        else_block = else_block[starts_length:]
+                        special_block = starts
+                        output.append(('IF_ELSE_SPECIAL', if_block, else_block, special_block))
+                    else:
+                        output.append(('IF_ELSE',if_block, else_block))
+                    output.extend(repeats)
+                    index += 1
+                    continue
+                if starts:
+                    starts_length = len(starts)
+                    if token[0] == 'IF_ELSE_SPECIAL':
+                        starts_length -= len(token[3]) # type: ignore
+                    if_block = if_block[starts_length:]
+                    else_block = else_block[starts_length:]
+                    special_block = starts
+                    output.append(('IF_ELSE_SPECIAL', if_block, else_block, special_block))
+                    index += 1
+                    continue
+                token = ('IF_ELSE', if_block, else_block)
+        elif token[0] == 'STACK':
+            if token[1] == current_stack:
+                index += 1
+                continue
+            current_stack = token[1]
+        elif token[0] == 'PUSH':
+            next_token = get_next_token(index)
+            if next_token[0] == 'POP':
+                index += 2
+                continue
+        elif token[0] == 'PRINT':
+            next_token = get_next_token(index)
+            if next_token[0] == 'PRINT':
+                token = (token[0], token[1]+next_token[1]) # type: ignore
+                output.append(token)
+                index += 2
+                continue
+        output.append(token)
         index += 1
-        last_token = list(token)
-    return new_tokens
+    if amount > 1:
+        for _ in range(amount-1):
+            new_output = optimize(output, 1, rearrange, _current_bit=original_current_bit)
+            if not (original_current_bit is None):
+                new_output = new_output[0]
+            if new_output == output:
+                break
+            output = new_output
+    if not (original_current_bit is None):
+        return output, _current_bit # type: ignore
+    return output
 
 class FormatError(SyntaxError):
     pass
@@ -346,13 +528,15 @@ def decompile(tokens):
         elif token[0] == 'DEF':
             output.append(':['+decompile(token[1])+']')
         elif token[0] == 'DEF_EXEC':
-            output.append(':()'+decompile(token[1])+')')
+            output.append(':('+decompile(token[1])+')')
         elif token[0] == 'IF':
             output.append('['+decompile(token[1])+']')
         elif token[0] == 'ELSE':
             output.append('[,'+decompile(token[1])+']')
         elif token[0] == 'IF_ELSE':
             output.append('['+decompile(token[1])+','+decompile(token[2])+']')
+        elif token[0] == 'IF_ELSE_SPECIAL':
+            output.append('['+decompile(token[1])+','+decompile(token[2])+','+decompile(token[3])+']')
         elif token[0] == 'LOOP':
             output.append('('+decompile(token[1])+')')
         elif token[0] == 'STACK':
@@ -387,6 +571,7 @@ def evaluator(tokens,inputs=None):
     loop_depth = 0
     
     depth = [["ROOT",0]]
+    special = []
     def get_token(depth):
         token = tokens
         for i in depth:
@@ -410,6 +595,19 @@ def evaluator(tokens,inputs=None):
                 loop_depth += 1
             elif name == "ROOT":
                 token = ("HALT",)
+            elif name == "IF_ELSE_SPECIAL":  # hacky way
+                depth.pop()
+                should_check = depth.pop()[-1] == 3
+                if should_check:
+                    c_bit = special.pop()
+                    if c_bit:
+                        depth.append([name,1])
+                    else:
+                        depth.append([name,2])
+                    depth.append([name, 0])
+                    continue
+                else:
+                    token = ("BREAK",)
             else:
                 # works for functions as well.
                 token = ("BREAK",)
@@ -513,6 +711,10 @@ def evaluator(tokens,inputs=None):
             else:
                 depth.append([op,2]) # go to list
             depth.append([op,-1]) # go to index
+        elif op == "IF_ELSE_SPECIAL":
+            depth.append([op,3])
+            depth.append([op,-1])
+            special.append(current_bit)
         elif op == "ELSE":
             if not current_bit:
                 depth.append([op,1]) # go to list
@@ -541,7 +743,6 @@ def evaluator(tokens,inputs=None):
         
 def brainknot(code, inputs=None):
     lexed = lexer(code)
-    parsed = parser(lexed)
     evaluated = evaluator(parsed,inputs)
     return evaluated
 
@@ -578,10 +779,8 @@ def main():
         print()
         try:
             l = lexer(code)
-            p = parser(l)
-            pp(p)
             print()
-            e = evaluator(p, inputs)
+            e = evaluator(l, inputs)
             print(e[0])
             print()
         except Exception as e:
