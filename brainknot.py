@@ -160,7 +160,7 @@ def lexer(code, optimize_=True):
                 if loop_depth == 0 and if_depth == 0:
                     if special_start:
                         if_segment = code[if_start+1:else_start]
-                        else_segment = code[else_start+1:special_start] # type: ignore
+                        else_segment = code[else_start+1:special_start]
                         special_segment = code[special_start+1:index]
                         token = ("IF_ELSE_SPECIAL", lexer(if_segment,False), lexer(else_segment,False), lexer(special_segment,False))
                     elif else_start is None:
@@ -302,7 +302,7 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
             if not is_dependent(next_token):
                 index += 1
                 continue
-            if _current_bit < 2: # type: int
+            if _current_bit < 2:
                 _current_bit = 1 - _current_bit
         elif token[0] == 'LOOP':
             loop_block = token[1]
@@ -316,9 +316,9 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                 output.extend(loop_block)
                 index += 1
                 continue
-            if temp == 1:
-                # raise RuntimeError("Loop never breaks")
-                pass
+            # if temp == 1:
+            #     raise RuntimeError("Loop never breaks")
+            #     pass
             token = (token[0], loop_block)
         elif token[0] == 'IF':
             if_block = token[1]
@@ -349,17 +349,17 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
             token = ('ELSE', else_block)
         elif token[0] in ('IF_ELSE', 'IF_ELSE_SPECIAL'):
             if_block, if_temp = optimize(token[1], amount, rearrange, _current_bit=1)
-            else_block, else_temp = optimize(token[2], amount, rearrange, _current_bit=0) # type: ignore
+            else_block, else_temp = optimize(token[2], amount, rearrange, _current_bit=0)
             if len(if_block) == 0:
                 if len(else_block) == 0 or token[0] == 'IF_ELSE_SPECIAL':
                     if token[0] == 'IF_ELSE_SPECIAL':
                         if len(else_block) == 0:
-                            temp, _current_bit = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                            temp, _current_bit = optimize(token[3], amount, rearrange, _current_bit=_current_bit)
                             output.extend(temp)
                         else:
-                            temp_b, temp_c = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                            temp_b, temp_c = optimize(token[3], amount, rearrange, _current_bit=_current_bit)
                             if _current_bit in (0, 2):
-                                temp_a, temp_d = optimize(token[2], amount, rearrange, _current_bit=temp_c) # type: ignore
+                                temp_a, temp_d = optimize(token[2], amount, rearrange, _current_bit=temp_c)
                             if _current_bit == 0:
                                 output.extend(temp_b)
                                 output.extend(temp_a)
@@ -385,9 +385,9 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                         continue
                     token = ('IF', if_block)
                 else:
-                    temp_b, temp_c = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                    temp_b, temp_c = optimize(token[3], amount, rearrange, _current_bit=_current_bit)
                     if _current_bit in (1,2):
-                        temp_a, temp_d = optimize(token[1], amount, rearrange, _current_bit=temp_c) # type: ignore
+                        temp_a, temp_d = optimize(token[1], amount, rearrange, _current_bit=temp_c)
                     if _current_bit == 1:
                         output.extend(temp_b)
                         output.extend(temp_a)
@@ -402,13 +402,13 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                     continue
             else:
                 if token[0] == 'IF_ELSE_SPECIAL':
-                    starts, temp = optimize(token[3], amount, rearrange, _current_bit=_current_bit) # type: ignore
+                    starts, temp = optimize(token[3], amount, rearrange, _current_bit=_current_bit)
                     if _current_bit in (1, 2):
                         if_block, temp_a = optimize(if_block, amount, rearrange, _current_bit=temp)
                     else:
                         if_block = []
                     if _current_bit in (0, 2):
-                        else_block, temp_b = optimize(else_block, amount, rearrange, _current_bit=temp) # type: ignore
+                        else_block, temp_b = optimize(else_block, amount, rearrange, _current_bit=temp)
                     else:
                         else_block = []
                     if _current_bit == 0:
@@ -423,7 +423,7 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                         output.extend(if_block)
                         index += 1
                         continue
-                    elif temp_a == temp_b: # type: ignore
+                    elif temp_a == temp_b:
                         _current_bit = temp_a
                 else:
                     if is_loop(if_block):
@@ -458,12 +458,12 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                 for a, b in zip(if_block, else_block):
                     if a != b:
                         break
-                    starts.append(a) # type: ignore
+                    starts.append(a)
                 if repeats:
                     if starts:
                         starts_length = len(starts)
                         if token[0] == 'IF_ELSE_SPECIAL':
-                            starts_length -= len(token[3]) # type: ignore
+                            starts_length -= len(token[3])
                         if_block = if_block[starts_length:]
                         else_block = else_block[starts_length:]
                         special_block = starts
@@ -476,7 +476,7 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                 if starts:
                     starts_length = len(starts)
                     if token[0] == 'IF_ELSE_SPECIAL':
-                        starts_length -= len(token[3]) # type: ignore
+                        starts_length -= len(token[3])
                     if_block = if_block[starts_length:]
                     else_block = else_block[starts_length:]
                     special_block = starts
@@ -497,7 +497,7 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
         elif token[0] == 'PRINT':
             next_token = get_next_token(index)
             if next_token[0] == 'PRINT':
-                token = (token[0], token[1]+next_token[1]) # type: ignore
+                token = (token[0], token[1]+next_token[1])
                 output.append(token)
                 index += 2
                 continue
