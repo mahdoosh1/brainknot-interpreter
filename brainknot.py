@@ -473,4 +473,352 @@ def optimize(tokens: list[tuple], amount=2, rearrange=True, _current_bit: int=-1
                     output.extend(repeats)
                     index += 1
                     continue
-          
+                if starts:
+                    starts_length = len(starts)
+                    if token[0] == 'IF_ELSE_SPECIAL':
+                        starts_length -= len(token[3])
+                    if_block = if_block[starts_length:]
+                    else_block = else_block[starts_length:]
+                    special_block = starts
+                    output.append(('IF_ELSE_SPECIAL', if_block, else_block, special_block))
+                    index += 1
+                    continue
+                token = ('IF_ELSE', if_block, else_block)
+        elif token[0] == 'STACK':
+            if token[1] == current_stack:
+                index += 1
+                continue
+            current_stack = token[1]
+        elif token[0] == 'PUSH':
+            next_token = get_next_token(index)
+            if next_token[0] == 'POP':
+                index += 2
+                continue
+        elif token[0] == 'PRINT':
+            next_token = get_next_token(index)
+            if next_token[0] == 'PRINT':
+                token = (token[0], token[1]+next_token[1])
+                output.append(token)
+                index += 2
+                continue
+        output.append(token)
+        index += 1
+    if amount > 1:
+        for _ in range(amount-1):
+            new_output = optimize(output, 1, rearrange, _current_bit=original_current_bit)
+            if not (original_current_bit == -1):
+                new_output = new_output[0]
+            if new_output == output:
+                break
+            output = new_output
+    if original_current_bit != -1:
+        return output, _current_bit
+    return output
+
+class FormatError(SyntaxError):
+    pass
+
+def validate(tokens):
+    if isinstance(tokens, list) or isinstance (tokens, tuple):
+        for token in tokens:
+            if len(token) == 0:
+                raise FormatError("Detected empty token")
+            if not isinstance(token[0], str):
+                raise FormatError("Detected non-string name for token")
+            if len(token) > 1:
+                if token[0] in ("FUNC_NAME", "PRINT"):
+                    if not isinstance(token[1], str):
+                        raise FormatError("Detected non-string parameter for FUNC_NAME or PRINT")
+                    continue
+                for new_tokens in token[1:]:
+                    validate(new_tokens)
+        return
+    raise FormatError("Non iterable tokens")
+
+def decompile(tokens):
+    output = []
+    direct_copy = {
+        'INPUT': '>',
+        'OUTPUT': '<',
+        'POP': '-',
+        'PUSH': '+',
+        'POPPUSH': '~',
+        'FLIP': '*',
+        'PSTACK': '_',
+        'BREAK': '.',
+        'PIXEL': '^',
+        'LINE': '\\',
+        'FRAME': ';'
+    }
+    for token in tokens:
+        if token[0] == 'PRINT':
+            output.append('{'+token[1]+'}')
+        elif token[0] == 'FUNC_NAME':
+            output.append(' '+token[1])
+        elif token[0] == 'DEF':
+            output.append(':['+decompile(token[1])+']')
+        elif token[0] == 'DEF_EXEC':
+            output.append(':('+decompile(token[1])+')')
+        elif token[0] == 'IF':
+            output.append('['+decompile(token[1])+']')
+        elif token[0] == 'ELSE':
+            output.append('[,'+decompile(token[1])+']')
+        elif token[0] == 'IF_ELSE':
+            output.append('['+decompile(token[1])+','+decompile(token[2])+']')
+        elif token[0] == 'IF_ELSE_SPECIAL':
+            output.append('['+decompile(token[1])+','+decompile(token[2])+','+decompile(token[3])+']')
+        elif token[0] == 'LOOP':
+            output.append('('+decompile(token[1])+')')
+        elif token[0] == 'STACK':
+            output.append(' '+str(token[1]))
+        else:
+            output.append(direct_copy[token[0]])
+    return ''.join(output)
+
+def evaluator(tokens,inputs=None):
+    if inputs is None:
+        inputs = []
+    if isinstance(inputs, str):
+        inputs = inputs[::-1]
+    if isinstance(tokens, str):
+        tokens = literal_eval(tokens)
+        validate(tokens)
+    input_stack = list(map(int,inputs))
+    output_stack = []
+    memory_stack = [[0] * 256] * 256  # Adjust stack size as needed
+
+    # Current memory pointer and bit
+    mem_ptr = [0, [0]*256]
+    current_bit = 0
+    # Function address table and return stack
+    funcs = {} # name : depth
+    # Image Buffer
+    current_screen = Image.new('L',(64,64),color=127)
+    screen_location = [0, 0]
+    frames = []
+    # recursive index: [name, index]
+    loop_break = 200
+    loop_depth = 0
+    
+    depth = [["ROOT",0]]
+    special = []
+    def get_token(depth):
+        token = tokens
+        for i in depth:
+            name, index = i
+            if name == "CALL" and isinstance(index, str):
+                token = funcs[index]
+            elif index < len(token):
+                token = token[index]
+            else:
+                return False, name
+        return True, token
+    while True:
+        if loop_depth > loop_break:
+            output_stack.append("AntiLoop break")
+            break
+        valid, temp = get_token(depth)
+        if not valid:
+            name = temp
+            if name == "LOOP":
+                token = ("RELOOP",)
+                loop_depth += 1
+            elif name == "ROOT":
+                token = ("HALT",)
+            elif name == "IF_ELSE_SPECIAL":  # hacky way
+                depth.pop()
+                should_check = depth.pop()[-1] == 3
+                if should_check:
+                    c_bit = special.pop()
+                    if c_bit:
+                        depth.append([name,1])
+                    else:
+                        depth.append([name,2])
+                    depth.append([name, 0])
+                    continue
+                else:
+                    token = ("BREAK",)
+            else:
+                # works for functions as well.
+                token = ("BREAK",)
+        else:
+            token = temp
+        op = token[0]
+        if op == "INPUT":
+            if len(input_stack):
+                current_bit = input_stack.pop()
+            else:
+                op = "LOOP_BREAK"
+        elif op == "OUTPUT":
+            output_stack.append(current_bit)
+        elif op == "PUSH":
+            addr = mem_ptr[1][mem_ptr[0]]
+            memory_stack[addr].append(current_bit)
+            addr += 1
+            mem_ptr[1][mem_ptr[0]] = addr
+        elif op == "POP":
+            addr = mem_ptr[1][mem_ptr[0]]
+            if addr:
+                current_bit = memory_stack[addr].pop()
+                addr -= 1
+                mem_ptr[1][mem_ptr[0]] = addr
+            else:
+                op = "LOOP_BREAK"
+        elif op == "POPPUSH":
+            addr = mem_ptr[1][mem_ptr[0]]
+            if addr:
+                current_bit = memory_stack[addr][-1]
+            else:
+                op = "LOOP_BREAK"
+        elif op == "FLIP":
+            current_bit = 1 - current_bit
+        elif op == "PSTACK":
+            addr = mem_ptr[1][mem_ptr[0]]
+            if addr:
+                output_stack.append(memory_stack[addr])
+            else:
+                output_stack.append([])
+        elif op == "PIXEL":
+            current_screen.putpixel(screen_location, current_bit*255)
+            screen_location[0] += 1
+        elif op == "LINE":
+            screen_location[0] = 0
+            screen_location[1] += 1
+        elif op == "FRAME":
+            screen_location = [0, 0]
+            frames.append(current_screen)
+            current_screen = Image.new("L",(64,64),color=127)
+        elif op == "PRINT":
+            output_stack.append(token[1])
+        elif op in ("DEF", "DEF_EXEC"):
+            depth[-1][1] -= 1
+            valid, temp = get_token(depth)
+            depth[-1][1] += 1
+            if valid:
+                name = temp[1]
+                func_token = token[1]
+                funcs[name] = func_token
+                if op == "DEF_EXEC":
+                    depth.append(["CALL",name])
+                    depth.append(["CALL",-1])
+            else:
+                raise SyntaxError("Defined a function without a name behind it")
+        elif op == "FUNC_NAME":
+            name = token[1]
+            depth[-1][1] += 1
+            valid, temp = get_token(depth)
+            depth[-1][1] -= 1
+            if valid:
+                if temp[0] not in ("DEF","DEF_EXEC"):
+                    if name not in funcs:
+                        raise KeyError(f"Function {name} doesn't exist")
+                    depth.append(["CALL",name])
+                    depth.append(["CALL",-1])
+            else:
+                if name not in funcs:
+                    raise KeyError(f"Function {name} doesn't exist")
+                depth.append(["CALL",name])
+                depth.append(["CALL",-1])
+        elif op == "LOOP":
+            if current_bit:
+                depth.append([op,1]) # go to list
+                depth.append([op,-1]) # go to index
+        elif op == "RELOOP":
+            if len(depth) > 2:
+                depth.pop()
+                depth.pop()
+            else:
+                raise RuntimeError("Tried to end a loop which doesn't exist")
+            if current_bit:
+                depth[-1][1] -= 1
+        elif op == "IF":
+            if current_bit:
+                depth.append([op,1]) # go to list
+                depth.append([op,-1]) # go to index
+        elif op == "IF_ELSE":
+            if current_bit:
+                depth.append([op,1]) # go to list
+            else:
+                depth.append([op,2]) # go to list
+            depth.append([op,-1]) # go to index
+        elif op == "IF_ELSE_SPECIAL":
+            depth.append([op,3])
+            depth.append([op,-1])
+            special.append(current_bit)
+        elif op == "ELSE":
+            if not current_bit:
+                depth.append([op,1]) # go to list
+                depth.append([op,-1]) # go to index
+        if op == "LOOP_BREAK":
+            if len(depth) > 2:
+                a, b = depth[-2], depth[-1]
+                if a[0] == "LOOP" and b[0] == "LOOP":
+                    depth.pop()
+                    depth.pop()
+                else:
+                    raise RuntimeError("There were not enough inputs")
+            else:
+                raise RuntimeError("There were not enough inputs")
+        if op == "BREAK":
+            if len(depth) > 2:
+                depth.pop() # get the index out
+                depth.pop() # get the list out
+            else:
+                raise RuntimeError("Cannot break from an statement which doesn't exist")
+        elif op == "HALT":
+            break
+        depth[-1][1] += 1
+    output = ''.join(list(map(str,output_stack)))
+    return output, frames
+        
+def brainknot(code, inputs=None):
+    lexed = lexer(code)
+    evaluated = evaluator(lexed,inputs)
+    return evaluated
+
+def pretty_print(tokens,indent=0):
+    output = []
+    space = " "*indent
+    for token in tokens:
+        if isinstance(token[-1],list):
+            output.append(token[0]+":")
+            for i in token[1:]:
+                output.append("    "+pretty_print(i,indent+4))
+                output.append("    "+"-"*(indent+4))
+            output.pop()
+        elif len(token) == 2:
+            output.append(token[0]+"("+token[1]+")")
+        else:
+            output.append(token[0])
+    output = ("\n"+space).join(output)
+    return output
+
+def pp(tokens):
+    print(pretty_print(tokens))
+
+def main():
+    from traceback import format_exc
+    prev = ""
+    while True:
+        code = input("code: ")
+        if code.lower() in ("exit","quit"):
+            break
+        if code.lower().startswith("prev"):
+            code = prev
+        inputs = input("inputs: ")
+        print()
+        try:
+            l = lexer(code)
+            print()
+            e = evaluator(l, inputs)
+            print(e[0])
+            print()
+        except Exception as e:
+            print(format_exc())
+        prev = code
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
