@@ -89,7 +89,7 @@ def convert_3rd_if(code):
     return code
 
 def lexer(code, optimize_=True):
-    code = convert_3rd_if(code)
+    #code = convert_3rd_if(code)
     tokens = []
     print_statement = False
     comment = False
